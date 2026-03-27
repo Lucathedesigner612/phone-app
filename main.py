@@ -63,4 +63,48 @@ with st.sidebar:
             st.write("---")
             st.subheader("🔗 Tracking Link")
             # Generate the link to send to the target
-            base_url = 
+            base_url = "https://luca-phone-app.streamlit.app/" # UPDATE THIS TO YOUR URL
+            track_link = f"{base_url}?mode=track&phone={number_input}"
+            st.code(track_link)
+            st.caption("Send this link to the target. Once they click 'Allow', they appear on the map.")
+        except:
+            st.error("Invalid Number Format")
+
+# --- 4. MAP & HISTORY ---
+col1, col2 = st.columns([1, 3])
+
+with col1:
+    st.subheader("📜 Signal Logs")
+    if os.path.exists(LOG_FILE):
+        df = pd.read_csv(LOG_FILE)
+        nums = df['Phone'].unique()
+        selected = st.selectbox("View History For:", nums)
+        filtered = df[df['Phone'] == selected]
+        st.dataframe(filtered.tail(10), use_container_width=True)
+        if st.button("🗑️ Reset All"):
+            os.remove(LOG_FILE)
+            st.rerun()
+    else:
+        st.write("No signals detected.")
+
+with col2:
+    st.subheader("🌍 Live Path Projection")
+    # Default center (Malta)
+    m = folium.Map(location=[35.85, 14.45], zoom_start=11)
+    
+    if os.path.exists(LOG_FILE) and not df.empty:
+        # Path breadcrumbs
+        path_points = filtered[['Lat', 'Lon']].values.tolist()
+        folium.PolyLine(path_points, color="#6772E5", weight=4, opacity=0.8).add_to(m)
+        
+        # Last known location
+        latest = filtered.iloc[-1]
+        folium.Marker(
+            [latest['Lat'], latest['Lon']],
+            popup=f"Target: {selected}\nTime: {latest['Time']}",
+            icon=folium.Icon(color='red', icon='crosshairs', prefix='fa')
+        ).add_to(m)
+        m.location = [latest['Lat'], latest['Lon']]
+        m.zoom_start = 15
+
+    st_folium(m, width="100%", height=600)
