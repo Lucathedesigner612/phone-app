@@ -1,109 +1,69 @@
 import streamlit as st
+import phonenumbers
+from phonenumbers import geocoder, carrier
 from streamlit_folium import st_folium
 import folium
 import pandas as pd
-from datetime import datetime
-import streamlit.components.v1 as components
 
-# --- 1. PAGE SETUP ---
-st.set_page_config(page_title="GPS Tracker Pro", layout="wide", page_icon="📡")
+st.set_page_config(page_title="Luca's Signal Tracker", layout="wide")
 
-# --- 2. DATABASE (Simulated) ---
-# Note: In a professional version, we would use 'st.connection' to a SQL database
-if "db" not in st.session_state:
-    st.session_state.db = []
+# --- DATABASE ---
+if "target_coords" not in st.session_state:
+    st.session_state.target_coords = None
 
-# --- 3. THE TRACKING ENGINE (JavaScript) ---
-# This script runs on the phone browser to grab GPS coordinates
-tracker_html = """
-<div style="background: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center; border: 2px solid #6772E5;">
-    <h3 style="color: #1f1f1f; font-family: sans-serif;">System Status: Active</h3>
-    <p id="status" style="color: #666;">Waiting for Authorization...</p>
-    <button onclick="startTracking()" style="background: #6772E5; color: white; padding: 15px 30px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; width: 100%;">
-        🛰️ ENABLE LIVE TRACKING
-    </button>
-</div>
+st.title("📡 Satellite Phone Tracker")
 
-<script>
-    function startTracking() {
-        document.getElementById('status').innerHTML = "Requesting GPS Access...";
-        if (navigator.geolocation) {
-            navigator.geolocation.watchPosition(sendPosition, handleError, {
-                enableHighAccuracy: true,
-                maximumAge: 0
-            });
-        } else {
-            alert("Geolocation is not supported by this browser.");
-        }
-    }
-
-    function sendPosition(position) {
-        const lat = position.coords.latitude;
-        const lon = position.coords.longitude;
-        const timestamp = new Date().toLocaleTimeString();
-        
-        document.getElementById('status').innerHTML = "📡 Signal Locked: " + lat.toFixed(4) + ", " + lon.toFixed(4);
-        
-        // Push data to Streamlit
-        window.parent.postMessage({
-            type: 'streamlit:setComponentValue',
-            value: {lat: lat, lon: lon, time: timestamp}
-        }, '*');
-    }
-
-    function handleError(error) {
-        document.getElementById('status').innerHTML = "❌ Error: " + error.message;
-    }
-</script>
-"""
-
-# --- 4. WEBSITE TABS ---
-tab1, tab2 = st.tabs(["📍 Live Map", "📱 Device Setup"])
-
-with tab2:
-    st.header("Setup a Device")
-    st.info("Open this page on the phone you want to track and click the button below.")
+# --- STEP 1: THE LOOKUP ---
+with st.sidebar:
+    st.header("🔍 Identify Target")
+    number_input = st.text_input("Enter Phone Number (with +)", placeholder="+356 99...")
     
-    # This captures the data from the JavaScript button
-    location_data = components.html(tracker_html, height=250)
-    
-    # If data comes in from the phone, save it to the history
-    if location_data:
-        # Check if the last point is the same to avoid duplicates
-        if not st.session_state.db or st.session_state.db[-1]['time'] != location_data['time']:
-            st.session_state.db.append(location_data)
+    if number_input:
+        try:
+            parsed_num = phonenumbers.parse(number_input)
+            location = geocoder.description_for_number(parsed_num, "en")
+            isp = carrier.name_for_number(parsed_num, "en")
+            st.success(f"📍 Location: {location}")
+            st.info(f"📶 Carrier: {isp}")
+            
+            st.divider()
+            st.subheader("🔗 Send Tracking Link")
+            st.write("Send this link to the target. Once they click, the map will update.")
+            st.code(f"https://luca-phone-app.streamlit.app/?target={number_input.replace('+', '')}")
+        except:
+            st.error("Invalid format. Use + and Country Code.")
 
-with tab1:
-    st.header("Global Satellite View")
+# --- STEP 2: THE MAP ---
+col1, col2 = st.columns([3, 1])
+
+with col1:
+    # Default Map Center (Malta)
+    m = folium.Map(location=[35.85, 14.45], zoom_start=10)
     
-    if not st.session_state.db:
-        st.warning("No active signals. Please enable tracking on a device in the 'Device Setup' tab.")
-        # Default view (Malta)
-        m = folium.Map(location=[35.8989, 14.5146], zoom_start=11)
-    else:
-        # Get the latest position
-        latest = st.session_state.db[-1]
-        st.metric("Latest Signal", f"{latest['lat']:.4f}, {latest['lon']:.4f}", f"Updated: {latest['time']}")
+    # Check if a target has shared their location
+    query_params = st.query_params
+    if "lat" in query_params:
+        lat = float(query_params["lat"])
+        lon = float(query_params["lon"])
+        st.session_state.target_coords = [lat, lon]
         
-        # Create Map
-        m = folium.Map(location=[latest['lat'], latest['lon']], zoom_start=16, tiles="Stamen Terrain")
-        
-        # Draw a line of the path taken
-        path = [[point['lat'], point['lon']] for point in st.session_state.db]
-        folium.PolyLine(path, color="blue", weight=2.5, opacity=0.8).add_to(m)
-        
-        # Marker for current position
+    if st.session_state.target_coords:
         folium.Marker(
-            [latest['lat'], latest['lon']],
-            popup="Target Device",
-            icon=folium.Icon(color="red", icon="screenshot", prefix="fa")
+            st.session_state.target_coords, 
+            popup="Target Device", 
+            icon=folium.Icon(color='red', icon='screenshot')
         ).add_to(m)
+        m.location = st.session_state.target_coords
+        m.zoom_start = 16
 
     st_folium(m, width="100%", height=500)
 
-# --- 5. DATA LOG ---
-with st.expander("📄 Raw Signal Logs"):
-    if st.session_state.db:
-        st.table(pd.DataFrame(st.session_state.db).tail(10))
+with col2:
+    st.subheader("Signal Logs")
+    if st.session_state.target_coords:
+        st.metric("Status", "🟢 ONLINE")
+        st.write(f"Lat: {st.session_state.target_coords[0]}")
+        st.write(f"Lon: {st.session_state.target_coords[1]}")
     else:
-        st.write("No data logged yet.")
+        st.metric("Status", "🔴 WAITING")
+        st.write("No live signal detected yet.")
